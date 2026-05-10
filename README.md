@@ -44,6 +44,12 @@ conda activate zero
 python ./examples/data_preprocess/countdown.py --local_dir {path_to_your_dataset}
 ```
 
+If your environment cannot access HuggingFace, use synthetic data:
+```
+conda activate zero
+python ./examples/data_preprocess/countdown.py --dataset_source synthetic --local_dir {path_to_your_dataset}
+```
+
 ### Run Training
 ```
 conda activate zero

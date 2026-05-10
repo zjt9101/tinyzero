@@ -2,10 +2,9 @@
 Preprocess dataset for countdown task - given a target number and N numbers, generate equations to reach target
 """
 
-import re
 import os
 from datasets import Dataset, load_dataset
-from random import randint, seed, choice
+from random import randint, seed
 from typing import List, Tuple
 from tqdm import tqdm
 from verl.utils.hdfs_io import copy, makedirs
@@ -70,7 +69,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--local_dir', default='~/data/countdown')
     parser.add_argument('--hdfs_dir', default=None)
-    parser.add_argument('--num_samples', type=int, default=100000)
+    parser.add_argument('--dataset_source', type=str, default='auto', choices=['auto', 'hf', 'synthetic'])
     parser.add_argument('--num_operands', type=int, default=6)
     parser.add_argument('--max_target', type=int, default=1000)
     parser.add_argument('--min_number', type=int, default=1)
@@ -78,6 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('--train_size', type=int, default=327680)
     parser.add_argument('--test_size', type=int, default=1024)
     parser.add_argument('--template_type', type=str, default='base')
+    parser.add_argument('--seed_value', type=int, default=42)
 
     args = parser.parse_args()
 
@@ -85,9 +85,32 @@ if __name__ == '__main__':
     TRAIN_SIZE = args.train_size
     TEST_SIZE = args.test_size
 
-    raw_dataset = load_dataset('Jiayi-Pan/Countdown-Tasks-3to4', split='train')
+    total_size = TRAIN_SIZE + TEST_SIZE
+    raw_dataset = None
 
-    assert len(raw_dataset) > TRAIN_SIZE + TEST_SIZE
+    if args.dataset_source in ['auto', 'hf']:
+        try:
+            raw_dataset = load_dataset('Jiayi-Pan/Countdown-Tasks-3to4', split='train')
+        except Exception as e:
+            if args.dataset_source == 'hf':
+                raise
+            print(f'Failed to load HuggingFace dataset, fallback to synthetic data: {e}')
+
+    if raw_dataset is None:
+        synthetic_samples = gen_dataset(
+            num_samples=total_size,
+            num_operands=args.num_operands,
+            max_target=args.max_target,
+            min_number=args.min_number,
+            max_number=args.max_number,
+            seed_value=args.seed_value,
+        )
+        raw_dataset = Dataset.from_dict({
+            'target': [sample[0] for sample in synthetic_samples],
+            'nums': [sample[1] for sample in synthetic_samples]
+        })
+
+    assert len(raw_dataset) >= total_size
     train_dataset = raw_dataset.select(range(TRAIN_SIZE))
     test_dataset = raw_dataset.select(range(TRAIN_SIZE, TRAIN_SIZE + TEST_SIZE))
 
@@ -120,8 +143,9 @@ if __name__ == '__main__':
     train_dataset = train_dataset.map(function=make_map_fn('train'), with_indices=True)
     test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
 
-    local_dir = args.local_dir
+    local_dir = os.path.expanduser(args.local_dir)
     hdfs_dir = args.hdfs_dir
+    os.makedirs(local_dir, exist_ok=True)
 
     train_dataset.to_parquet(os.path.join(local_dir, 'train.parquet'))
     test_dataset.to_parquet(os.path.join(local_dir, 'test.parquet'))
